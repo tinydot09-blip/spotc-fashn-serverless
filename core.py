@@ -1,48 +1,45 @@
-import sys
-import time
-
-print("=" * 68, flush=True)
-print("SPOTC FASHN VTON STARTING", flush=True)
-print(f"Python executable: {sys.executable}", flush=True)
-print(f"Python version: {sys.version}", flush=True)
-print("=" * 68, flush=True)
-
-print("[1/7] Importing standard Python libraries...", flush=True)
-
 import json
+import os
 import secrets
+import time
 import traceback
 import zipfile
 from datetime import datetime
 from pathlib import Path
 
-print("[2/7] Importing Gradio and Pillow...", flush=True)
-
-import gradio as gr
 from PIL import Image, ImageOps
-
-print("[3/7] Importing FASHN VTON pipeline and PyTorch modules...", flush=True)
-
-fashn_import_started = time.time()
-
 from fashn_vton import TryOnPipeline
-
-print(
-    f"[3/7] FASHN VTON imports completed in "
-    f"{time.time() - fashn_import_started:.1f} seconds.",
-    flush=True,
-)
 
 
 # ============================================================
 # PATHS AND LIMITS
 # ============================================================
 
-print("[4/7] Preparing application directories...", flush=True)
+print("=" * 68, flush=True)
+print("SPOTC FASHN VTON CORE STARTING", flush=True)
+print("=" * 68, flush=True)
 
-BASE_DIR = Path("/workspace/AIStudio/fashn-vton-1.5")
-WEIGHTS_DIR = BASE_DIR / "weights"
-OUTPUT_DIR = BASE_DIR / "outputs"
+# Works in both:
+# - RunPod Serverless: /app
+# - RunPod Pod/local project directory
+PROJECT_DIR = Path(__file__).resolve().parent
+
+# Optional environment override:
+# FASHN_WEIGHTS_DIR=/custom/path/weights
+WEIGHTS_DIR = Path(
+    os.environ.get(
+        "FASHN_WEIGHTS_DIR",
+        str(PROJECT_DIR / "weights"),
+    )
+)
+
+# Serverless workers can safely write temporary output here.
+OUTPUT_DIR = Path(
+    os.environ.get(
+        "FASHN_OUTPUT_DIR",
+        "/tmp/spotc-fashn-outputs",
+    )
+)
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -53,13 +50,14 @@ MIN_GARMENT_HEIGHT = 400
 MAX_INPUT_SIDE = 2048
 MAX_SEED = 2_147_483_000
 
-print(f"Base directory: {BASE_DIR}", flush=True)
+print(f"Project directory: {PROJECT_DIR}", flush=True)
 print(f"Weights directory: {WEIGHTS_DIR}", flush=True)
 print(f"Output directory: {OUTPUT_DIR}", flush=True)
 
 if not WEIGHTS_DIR.exists():
     raise RuntimeError(
-        f"Weights directory was not found: {WEIGHTS_DIR}"
+        f"FASHN weights directory was not found: {WEIGHTS_DIR}. "
+        "Confirm that the weights folder exists inside the Docker image."
     )
 
 
@@ -67,31 +65,26 @@ if not WEIGHTS_DIR.exists():
 # OPTIONAL BACKGROUND REMOVAL
 # ============================================================
 
-print("[5/7] Checking optional flat-lay cleanup...", flush=True)
-
 try:
     from rembg import remove as remove_background
 
     REMBG_AVAILABLE = True
-    print(
-        "Flat-lay background cleanup is available.",
-        flush=True,
-    )
+    print("Flat-lay cleanup is available.", flush=True)
 except Exception as error:
     remove_background = None
     REMBG_AVAILABLE = False
+
     print(
-        f"Flat-lay background cleanup unavailable: {error}",
+        f"Flat-lay cleanup is unavailable: {error}",
         flush=True,
     )
 
 
 # ============================================================
-# LOAD PIPELINE
+# LOAD PIPELINE ONCE PER WORKER
 # ============================================================
 
-print("[6/7] Loading FASHN VTON model pipeline...", flush=True)
-print("This stage loads the model weights into GPU memory.", flush=True)
+print("Loading FASHN VTON model pipeline...", flush=True)
 
 pipeline_load_started = time.time()
 
@@ -100,15 +93,12 @@ try:
         weights_dir=str(WEIGHTS_DIR),
     )
 except Exception:
-    print(
-        "FASHN VTON pipeline failed to load.",
-        flush=True,
-    )
+    print("FASHN VTON pipeline failed to load.", flush=True)
     traceback.print_exc()
     raise
 
 print(
-    f"FASHN VTON pipeline loaded successfully in "
+    "FASHN VTON pipeline loaded successfully in "
     f"{time.time() - pipeline_load_started:.1f} seconds.",
     flush=True,
 )
@@ -214,6 +204,67 @@ DEFAULT_VALUES = GARMENT_PRESETS[DEFAULT_PRESET]
 
 
 # ============================================================
+# VALIDATION
+# ============================================================
+
+VALID_CATEGORIES = {
+    "tops",
+    "bottoms",
+    "one-pieces",
+}
+
+VALID_GARMENT_PHOTO_TYPES = {
+    "model",
+    "flat-lay",
+}
+
+VALID_TRYON_MODES = {
+    "Natural / Maskless",
+    "Structured / Parsed",
+}
+
+VALID_SEED_MODES = {
+    "Fixed 42",
+    "Random",
+}
+
+
+def validate_generation_options(
+    category,
+    garment_photo_type,
+    quality,
+    tryon_mode,
+    seed_mode,
+):
+    if category not in VALID_CATEGORIES:
+        raise ValueError(
+            "Invalid category. Use tops, bottoms or one-pieces."
+        )
+
+    if garment_photo_type not in VALID_GARMENT_PHOTO_TYPES:
+        raise ValueError(
+            "Invalid garment_photo_type. Use model or flat-lay."
+        )
+
+    if quality not in QUALITY_PROFILES:
+        raise ValueError(
+            "Invalid quality. Use Fast, Balanced, "
+            "High Quality or Premium Quality."
+        )
+
+    if tryon_mode not in VALID_TRYON_MODES:
+        raise ValueError(
+            "Invalid tryon_mode. Use Natural / Maskless "
+            "or Structured / Parsed."
+        )
+
+    if seed_mode not in VALID_SEED_MODES:
+        raise ValueError(
+            "Invalid seed_mode. Use Fixed 42 or Random."
+        )
+
+
+# ============================================================
 # IMAGE PREPARATION
 # ============================================================
 
@@ -230,8 +281,8 @@ def resize_large_image(image: Image.Image) -> Image.Image:
     new_height = max(1, round(height * scale))
 
     print(
-        f"Resizing input from {width}x{height} "
-        f"to {new_width}x{new_height}",
+        f"Resizing image from {width}x{height} "
+        f"to {new_width}x{new_height}.",
         flush=True,
     )
 
@@ -248,43 +299,50 @@ def prepare_image(
     minimum_height,
 ):
     if image is None:
-        raise gr.Error(
+        raise ValueError(
             f"Upload the {image_name.lower()}."
         )
 
+    if not isinstance(image, Image.Image):
+        raise ValueError(
+            f"{image_name} must be a valid Pillow image."
+        )
+
     try:
-        image = ImageOps.exif_transpose(image)
-        image = image.convert("RGB")
+        prepared = ImageOps.exif_transpose(image)
+        prepared = prepared.convert("RGB")
     except Exception as error:
-        raise gr.Error(
+        raise ValueError(
             f"Could not read the {image_name.lower()}: {error}"
         ) from error
 
-    width, height = image.size
+    width, height = prepared.size
 
     if width < minimum_width or height < minimum_height:
-        raise gr.Error(
+        raise ValueError(
             f"{image_name} is too small: {width} × {height}. "
-            f"Minimum recommended size is "
+            f"Minimum size is "
             f"{minimum_width} × {minimum_height}."
         )
 
     aspect_ratio = width / height
 
     if aspect_ratio < 0.25 or aspect_ratio > 4.0:
-        raise gr.Error(
+        raise ValueError(
             f"{image_name} has an unsuitable shape: "
             f"{width} × {height}."
         )
 
-    return resize_large_image(image)
+    return resize_large_image(prepared)
 
 
-def clean_flatlay_image(image: Image.Image) -> Image.Image:
-    if not REMBG_AVAILABLE:
-        raise gr.Error(
-            "Flat-lay cleanup could not start because rembg "
-            "is unavailable."
+def clean_flatlay_image(
+    image: Image.Image,
+) -> Image.Image:
+    if not REMBG_AVAILABLE or remove_background is None:
+        raise RuntimeError(
+            "Flat-lay cleanup cannot run because rembg "
+            "is not installed or failed to load."
         )
 
     print(
@@ -297,7 +355,7 @@ def clean_flatlay_image(image: Image.Image) -> Image.Image:
             image.convert("RGBA")
         )
     except Exception as error:
-        raise gr.Error(
+        raise RuntimeError(
             f"Flat-lay background removal failed: {error}"
         ) from error
 
@@ -305,7 +363,7 @@ def clean_flatlay_image(image: Image.Image) -> Image.Image:
     bounding_box = alpha.getbbox()
 
     if bounding_box is None:
-        raise gr.Error(
+        raise RuntimeError(
             "The garment could not be detected during cleanup."
         )
 
@@ -313,7 +371,9 @@ def clean_flatlay_image(image: Image.Image) -> Image.Image:
 
     padding = max(
         30,
-        round(max(cropped.width, cropped.height) * 0.08),
+        round(
+            max(cropped.width, cropped.height) * 0.08
+        ),
     )
 
     canvas_width = cropped.width + padding * 2
@@ -333,8 +393,8 @@ def clean_flatlay_image(image: Image.Image) -> Image.Image:
     cleaned = canvas.convert("RGB")
 
     print(
-        f"Flat-lay garment cleaned and cropped to "
-        f"{cleaned.width}x{cleaned.height}",
+        "Flat-lay garment cleaned to "
+        f"{cleaned.width}x{cleaned.height}.",
         flush=True,
     )
 
@@ -342,15 +402,16 @@ def clean_flatlay_image(image: Image.Image) -> Image.Image:
 
 
 # ============================================================
-# FILE OUTPUT
+# OUTPUT FILES
 # ============================================================
 
 def create_generation_folder() -> Path:
-    timestamp = datetime.now().strftime(
+    timestamp = datetime.utcnow().strftime(
         "%Y%m%d_%H%M%S_%f"
     )
 
     folder = OUTPUT_DIR / f"generation_{timestamp}"
+
     folder.mkdir(
         parents=True,
         exist_ok=False,
@@ -382,9 +443,7 @@ def save_generation(
 
         saved_paths.append(image_path)
 
-    metadata_path = (
-        generation_folder / "metadata.json"
-    )
+    metadata_path = generation_folder / "metadata.json"
 
     metadata_path.write_text(
         json.dumps(
@@ -418,17 +477,22 @@ def save_generation(
 def generate_tryon(
     person_image,
     garment_image,
-    category,
-    garment_photo_type,
-    quality,
-    tryon_mode,
-    seed_mode,
-    clean_flatlay,
+    category="tops",
+    garment_photo_type="model",
+    quality="Balanced",
+    tryon_mode="Natural / Maskless",
+    seed_mode="Random",
+    clean_flatlay=False,
 ):
-    print(
-        "Preparing uploaded images...",
-        flush=True,
+    validate_generation_options(
+        category=category,
+        garment_photo_type=garment_photo_type,
+        quality=quality,
+        tryon_mode=tryon_mode,
+        seed_mode=seed_mode,
     )
+
+    print("Preparing uploaded images...", flush=True)
 
     person_image = prepare_image(
         person_image,
@@ -446,19 +510,16 @@ def generate_tryon(
 
     if clean_flatlay:
         if garment_photo_type != "flat-lay":
-            raise gr.Error(
+            raise ValueError(
                 "Flat-lay cleanup can only be used when "
-                "Garment Photo Type is flat-lay."
+                "garment_photo_type is flat-lay."
             )
 
         garment_image = clean_flatlay_image(
             garment_image
         )
 
-    profile = QUALITY_PROFILES.get(
-        quality,
-        QUALITY_PROFILES["Balanced"],
-    )
+    profile = QUALITY_PROFILES[quality]
 
     selected_seed = (
         42
@@ -478,15 +539,9 @@ def generate_tryon(
         f"Garment photo type: {garment_photo_type}",
         flush=True,
     )
-    print(
-        f"Try-on mode: {tryon_mode}",
-        flush=True,
-    )
+    print(f"Try-on mode: {tryon_mode}", flush=True)
     print(f"Seed: {selected_seed}", flush=True)
-    print(
-        f"Samples: {profile['samples']}",
-        flush=True,
-    )
+    print(f"Samples: {profile['samples']}", flush=True)
     print(
         f"Timesteps: {profile['timesteps']}",
         flush=True,
@@ -526,32 +581,36 @@ def generate_tryon(
             "out of memory" in error_lower
             or "cuda out of memory" in error_lower
         ):
-            raise gr.Error(
-                "GPU memory is full. Restart the app and use "
-                "Balanced mode, or reduce the number of samples."
+            raise RuntimeError(
+                "GPU memory is full. Restart the worker and "
+                "use Balanced mode."
             ) from error
 
-        raise gr.Error(
+        raise RuntimeError(
             f"Try-on generation failed: {error_message}"
         ) from error
 
+    generation_seconds = (
+        time.time() - generation_started
+    )
+
     print(
         f"Generation completed in "
-        f"{time.time() - generation_started:.1f} seconds.",
+        f"{generation_seconds:.1f} seconds.",
         flush=True,
     )
 
     generated_images = list(result.images or [])
 
     if not generated_images:
-        raise gr.Error(
+        raise RuntimeError(
             "FASHN VTON returned no generated images."
         )
 
     generation_folder = create_generation_folder()
 
     metadata = {
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.utcnow().isoformat() + "Z",
         "quality": quality,
         "category": category,
         "garment_photo_type": garment_photo_type,
@@ -562,12 +621,16 @@ def generate_tryon(
         "timesteps": profile["timesteps"],
         "guidance_scale": profile["guidance"],
         "segmentation_free": segmentation_free,
-        "flatlay_cleanup": clean_flatlay,
+        "flatlay_cleanup": bool(clean_flatlay),
         "person_input_size": list(person_image.size),
         "garment_input_size": list(garment_image.size),
+        "generation_seconds": round(
+            generation_seconds,
+            3,
+        ),
     }
 
-    _, zip_path = save_generation(
+    saved_paths, zip_path = save_generation(
         generated_images,
         generation_folder,
         metadata,
@@ -593,7 +656,7 @@ def generate_tryon(
     status = (
         f"Generated {len(generated_images)} image(s). "
         f"Seed: {selected_seed}. "
-        f"Saved in: {generation_folder}"
+        f"Time: {generation_seconds:.1f} seconds."
     )
 
     print(status, flush=True)
@@ -606,7 +669,7 @@ def generate_tryon(
 
 
 # ============================================================
-# UI HELPERS
+# UI HELPERS USED BY app.py
 # ============================================================
 
 def apply_garment_preset(preset):
@@ -631,215 +694,3 @@ def clear_inputs():
         None,
         "Ready.",
     )
-
-
-# ============================================================
-# GRADIO UI
-# ============================================================
-
-print("[7/7] Building Gradio interface...", flush=True)
-
-with gr.Blocks(
-    title="SPOTC FASHN VTON AI Studio",
-) as demo:
-    gr.Markdown(
-        """
-# SPOTC FASHN VTON AI Studio
-
-Upload a clear person image and garment image.
-
-- **Balanced:** one economical result
-- **High Quality:** four candidates
-- **Premium Quality:** four candidates with additional inference
-- Use **Flat-Lay Cleanup** only for garment-only flat-lay photographs
-"""
-    )
-
-    garment_preset = gr.Dropdown(
-        choices=list(GARMENT_PRESETS.keys()),
-        value=DEFAULT_PRESET,
-        label="Garment Preset",
-    )
-
-    with gr.Row():
-        person = gr.Image(
-            type="pil",
-            label="Upload Person Image",
-            height=470,
-        )
-
-        garment = gr.Image(
-            type="pil",
-            label="Upload Garment Image",
-            height=470,
-        )
-
-    with gr.Row():
-        category = gr.Dropdown(
-            choices=[
-                "tops",
-                "bottoms",
-                "one-pieces",
-            ],
-            value=DEFAULT_VALUES[0],
-            label="Garment Category",
-        )
-
-        garment_photo_type = gr.Dropdown(
-            choices=[
-                "model",
-                "flat-lay",
-            ],
-            value=DEFAULT_VALUES[1],
-            label="Garment Photo Type",
-        )
-
-        quality = gr.Dropdown(
-            choices=[
-                "Fast",
-                "Balanced",
-                "High Quality",
-                "Premium Quality",
-            ],
-            value="Balanced",
-            label="Quality",
-        )
-
-    with gr.Row():
-        tryon_mode = gr.Dropdown(
-            choices=[
-                "Natural / Maskless",
-                "Structured / Parsed",
-            ],
-            value=DEFAULT_VALUES[2],
-            label="Try-On Mode",
-        )
-
-        seed_mode = gr.Dropdown(
-            choices=[
-                "Fixed 42",
-                "Random",
-            ],
-            value=DEFAULT_VALUES[3],
-            label="Seed Mode",
-        )
-
-    clean_flatlay = gr.Checkbox(
-        value=False,
-        label="Clean Flat-Lay Background",
-        info=(
-            "Enable only for garment-only flat-lay photos. "
-            "Do not use for garments worn by a model."
-        ),
-    )
-
-    with gr.Row():
-        generate_button = gr.Button(
-            "Generate Try-On",
-            variant="primary",
-        )
-
-        clear_button = gr.Button(
-            "Clear",
-        )
-
-    status = gr.Textbox(
-        value="Ready.",
-        label="Status",
-        interactive=False,
-    )
-
-    output = gr.Gallery(
-        label="Generated Try-On Results",
-        columns=2,
-        rows=2,
-        height=720,
-        object_fit="contain",
-        preview=True,
-    )
-
-    download_zip = gr.File(
-        label="Download All Results",
-    )
-
-    garment_preset.change(
-        fn=apply_garment_preset,
-        inputs=garment_preset,
-        outputs=[
-            category,
-            garment_photo_type,
-            tryon_mode,
-            seed_mode,
-        ],
-    )
-
-    generate_button.click(
-        fn=generate_tryon,
-        inputs=[
-            person,
-            garment,
-            category,
-            garment_photo_type,
-            quality,
-            tryon_mode,
-            seed_mode,
-            clean_flatlay,
-        ],
-        outputs=[
-            output,
-            download_zip,
-            status,
-        ],
-        api_name="generate",
-    )
-
-    clear_button.click(
-        fn=clear_inputs,
-        inputs=[],
-        outputs=[
-            person,
-            garment,
-            garment_preset,
-            category,
-            garment_photo_type,
-            quality,
-            tryon_mode,
-            seed_mode,
-            clean_flatlay,
-            output,
-            download_zip,
-            status,
-        ],
-    )
-
-
-# ============================================================
-# START SERVER
-# ============================================================
-
-if __name__ == "__main__":
-    print("=" * 68, flush=True)
-    print("STARTING SPOTC TRY-ON HTTP SERVER", flush=True)
-    print("Host: 0.0.0.0", flush=True)
-    print("Port: 7865", flush=True)
-    print("Public Gradio tunnel: disabled", flush=True)
-    print("=" * 68, flush=True)
-
-    try:
-        demo.queue(
-            default_concurrency_limit=1,
-            max_size=2,
-        ).launch(
-            server_name="0.0.0.0",
-            server_port=7865,
-            share=False,
-            show_error=True,
-            prevent_thread_lock=False,
-        )
-    except Exception:
-        print(
-            "Gradio server failed to start.",
-            flush=True,
-        )
-        traceback.print_exc()
-        raise
