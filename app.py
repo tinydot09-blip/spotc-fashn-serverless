@@ -12,7 +12,6 @@ from core import (
     generate_tryon,
 )
 
-
 print("=" * 68, flush=True)
 print("SPOTC FASHN VTON GRADIO APP STARTING", flush=True)
 print(f"Python executable: {sys.executable}", flush=True)
