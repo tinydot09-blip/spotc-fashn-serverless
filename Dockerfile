@@ -8,6 +8,6 @@ RUN pip install --upgrade pip
 
 RUN pip install -e .
 
-RUN pip install --ignore-installed runpod
+RUN pip install --ignore-installed runpod gradio
 
-CMD ["python", "handler.py"]
+CMD ["python", "-u", "handler.py"]
