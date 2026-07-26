@@ -182,7 +182,7 @@ class TryOnPipeline:
                 zip(timesteps[:-1], timesteps[1:]),
                 desc="Sampling",
                 total=len(timesteps) - 1,
-                disable=not use_tqdm,
+                disable=True,
             )
         ):
             dt = t_prev - t_curr

@@ -104,3 +104,12 @@ uv.lock
 *.bmp
 *.tiff
 *.tif
+.venv/
+__pycache__/
+*.pyc
+outputs/
+*.log
+.ipynb_checkpoints/
+app.py.backup*
+app.py.final_backup*
+src/fashn_vton/pipeline.py.backup*
