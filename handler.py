@@ -37,42 +37,69 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     try:
         print("SPOTC SERVERLESS: Job received", flush=True)
 
-        job_input = job.get("input") or {}
+        job_input = job.get("input")
 
-        # Import only after the worker is running.
-        print("SPOTC SERVERLESS: Importing app.generate_tryon", flush=True)
+        if not isinstance(job_input, dict):
+            return {
+                "success": False,
+                "stage": "validation",
+                "error": "input object is required",
+            }
+
+        person_value = job_input.get("person_image_base64")
+        garment_value = job_input.get("garment_image_base64")
+
+        # Validate before importing/loading the large AI application.
+        if not person_value:
+            return {
+                "success": False,
+                "stage": "validation",
+                "error": "person_image_base64 is required",
+            }
+
+        if not garment_value:
+            return {
+                "success": False,
+                "stage": "validation",
+                "error": "garment_image_base64 is required",
+            }
+
+        person = decode_image(
+            person_value,
+            "person_image_base64",
+        )
+
+        garment = decode_image(
+            garment_value,
+            "garment_image_base64",
+        )
+
+        print(
+            "SPOTC SERVERLESS: Importing app.generate_tryon",
+            flush=True,
+        )
 
         try:
             from app import generate_tryon
         except Exception as import_error:
+            traceback_text = traceback.format_exc()
+
             print(
-                "SPOTC SERVERLESS: Failed to import app.py",
+                "SPOTC SERVERLESS: app import failed",
                 file=sys.stderr,
                 flush=True,
             )
-            traceback.print_exc()
+            print(traceback_text, file=sys.stderr, flush=True)
 
             return {
                 "success": False,
                 "stage": "app_import",
                 "error": str(import_error),
-                "traceback": traceback.format_exc(),
+                "traceback": traceback_text,
                 "working_directory": str(Path.cwd()),
                 "app_exists": Path("/app/app.py").exists(),
                 "weights_in_app": Path("/app/weights").exists(),
             }
-
-        print("SPOTC SERVERLESS: app.py imported", flush=True)
-
-        person = decode_image(
-            job_input.get("person_image_base64", ""),
-            "person_image_base64",
-        )
-
-        garment = decode_image(
-            job_input.get("garment_image_base64", ""),
-            "garment_image_base64",
-        )
 
         category = job_input.get("category", "tops")
         garment_photo_type = job_input.get(
@@ -120,8 +147,6 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             output_path.read_bytes()
         ).decode("utf-8")
 
-        print("SPOTC SERVERLESS: Generation completed", flush=True)
-
         return {
             "success": True,
             "status": str(status),
@@ -131,18 +156,20 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         }
 
     except Exception as error:
+        traceback_text = traceback.format_exc()
+
         print(
             "SPOTC SERVERLESS: Request failed",
             file=sys.stderr,
             flush=True,
         )
-        traceback.print_exc()
+        print(traceback_text, file=sys.stderr, flush=True)
 
         return {
             "success": False,
             "stage": "request",
             "error": str(error),
-            "traceback": traceback.format_exc(),
+            "traceback": traceback_text,
         }
 
 
