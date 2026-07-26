@@ -7,7 +7,6 @@ from typing import Any
 import runpod
 from PIL import Image, ImageOps
 
-
 # The FASHN model is loaded only when the first real generation arrives.
 # Later jobs on the same warm worker reuse the already-loaded model.
 _generate_tryon = None
