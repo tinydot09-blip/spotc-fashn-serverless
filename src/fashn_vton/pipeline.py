@@ -252,12 +252,27 @@ class TryOnPipeline:
         garment_image_np = np.array(garment_image)
 
         # Pose detection (DWPose expects BGR)
-        person_pose = self.pose_model(person_image_np[..., ::-1])
-        garment_pose = (
-            get_dummy_dw_keypoints()
-            if garment_photo_type == "flat-lay"
-            else self.pose_model(garment_image_np[..., ::-1])
+        person_bgr = np.ascontiguousarray(
+    cv2.cvtColor(
+        person_image_np,
+        cv2.COLOR_RGB2BGR,
+    )
+)
+
+person_pose = self.pose_model(person_bgr)
+        if garment_photo_type == "flat-lay":
+    garment_pose = get_dummy_dw_keypoints()
+else:
+    garment_bgr = np.ascontiguousarray(
+        cv2.cvtColor(
+            garment_image_np,
+            cv2.COLOR_RGB2BGR,
         )
+    )
+
+    garment_pose = self.pose_model(
+        garment_bgr
+    )
 
         person_pose_img = draw_pose(person_pose, person_image_np.shape[0], person_image_np.shape[1], grayscale=True)
         garment_pose_img = draw_pose(garment_pose, garment_image_np.shape[0], garment_image_np.shape[1], grayscale=True)
