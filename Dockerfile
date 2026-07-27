@@ -5,7 +5,16 @@ WORKDIR /app
 COPY . /app
 
 RUN pip install --upgrade pip
+
+RUN pip uninstall -y \
+    opencv-python \
+    opencv-python-headless \
+    opencv-contrib-python \
+    opencv-contrib-python-headless \
+    numpy || true
+
 RUN pip install -e .
+
 RUN pip install --ignore-installed runpod gradio
 
 RUN python scripts/download_weights.py --weights-dir /app/weights
